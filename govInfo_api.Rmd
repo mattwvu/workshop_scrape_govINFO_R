@@ -1,0 +1,383 @@
+---
+title: "API_govInfo"
+author: "Matt Steele"
+date: '2022-04-05'
+output: html_document
+---
+
+===============================================================================
+
+## Set Working Directory
+
+
+```{r}
+
+setwd()
+
+getwd()
+
+```
+
+
+==============================================================================
+
+Packages that you will need to have installed
+
+```{r message=FALSE}
+
+install.packages("httr")
+install.packages("tidyverse")
+install.packages("jsonlite")
+install.packages("lubridate")
+install.packages("memoise") #EandrewJones
+install.packages("kableExtra") #EandrewJones
+
+```
+
+
+Packages that you will need to load
+
+```{r message=FALSE, warning=FALSE}
+
+library(httr)
+library(tidyverse)
+library(jsonlite)
+library(lubridate)
+library(memoise)
+library(kableExtra)
+
+```
+
+
+## Making a API request to the GPO's govINFO bulk data collection
+
+The govinfo api is intended to provide data users with a simple means to programmatically access govinfo content and metadata, which is stored in self-describing packages. 
+
+    https://api.data.gov/
+
+    https://github.com/usgpo/bulk-data
+    
+    https://github.com/usgpo/api
+
+
+===============================================================================
+
+## Set API key
+
+```{r}
+
+api_key <- "api_key=D1M56ytxJBohyd6sD01DNwlLqNxi404xxvTB5Hp9"
+
+govINFO_url <- "https://api.govinfo.gov/collections"
+
+```
+
+================================================================================
+
+## Base code and API call 
+
+
+```{r}
+
+exampleOne <- fromJSON("https://api.govinfo.gov/collections/BILLS/2018-01-01T00:00:00Z/?offset=0&pageSize=100&api_key=D1M56ytxJBohyd6sD01DNwlLqNxi404xxvTB5Hp9")
+
+exampleTwo <- fromJSON(paste(govINFO_url, api_key, sep = "?"))
+  exampleTwo
+  str(exampleOne)
+
+```
+
+
+=================================================================================
+
+We're going to be making a lot of repetitive API calls. Let' memoise fromJSON to make them faster.
+
+
+```{r}
+
+.fromJSON <- memoise(fromJSON)
+
+.fromJSON("https://api.govinfo.gov/collections/BILLS/2018-01-01T00:00:00Z/?offset=0&pageSize=100&api_key=D1M56ytxJBohyd6sD01DNwlLqNxi404xxvTB5Hp9")
+
+```
+
+
+=======================================================================================
+
+
+## Step 1:  View the Collections Available
+
+A Preliminary Look at the Bulk Data Repository
+
+Before, diving into the Congressional Bills, it is nice to get a bird's-eye view of the API and see what it has to offer. Below is a function that calls and returns a data frame of all the collections that can be requested via the API, how many items are in each collection, and so on.
+
+```{r}
+
+# Function to show the collections
+show_collections <- function(key = api_key) {
+  # Collections URL
+  collections_url <- "https://api.govinfo.gov/collections"
+
+  # Get collections
+  call <- .fromJSON(paste(collections_url, api_key, sep="?"))
+  df <- call$collections
+  return(df)
+}
+
+.fromJSON(paste(collections_url, api_key, sep = "?"))
+
+show_collections()
+
+# Show collections
+require(knitr)
+require(kableExtra)
+gpoCollections <- show_collections() %>% 
+  kable(caption = 'US GPO Bulk Data Collections') %>% 
+  kable_styling(bootstrap_options = 'hover', full_width = F, 
+                position = 'center', font_size = 10) %>% 
+  scroll_box(width = "100%", height = "1000px")
+
+gpoCollections
+
+
+```
+
+
+Collection document counts range from 6 for the Senate Manual to 1,412,239 for Court Opinions. The first column provides the collection code we will use in our API request (BILLS).
+
+The GPO's github page offers clear advice on how to request information from a given collection. Requests must be passed to GET in the following format:
+
+https://api.govinfo.gov/collections/{collection}/{startDate}?offset={#}&pagsize={#}&api_key={YOUR_KEY}
+
+    the collection code and startDate is the beginning time period of the request. 
+    
+    offset will move your through pages
+    
+    pagesize determines how many items are returned per request page. 
+
+There is a 10000 item limit on collections responses. This means that if your update range is too broad, you may need to narrow it down using the endDate parameter which is paled after startDate separated by a /.
+
+Note the earliest startDate is no earlier than 2017-01-01 even though the dates of the content within each collection predates this. The reason is because the packages (content) in each collection are dated according to when they were last modified in the database. When combined with their 10,000 item request limit, this ends up being a major flaw in my opinion and is a known issue.
+
+If we wanted to scrape all the bills from the collection, we'd be limited to batches of size 10,000. This wouldn't be a huge hassle if the bills were last modified in batches over a relatively even interval. Of course, that's not the case. For example, there is a two day period (May 20, 2018 - May 22, 2018) in which 197,569 bills were modified. And within that period there are two 2-hour periods with 49,465 and 148,104 bills...
+
+Fortunately, the maintainers at USGPO created a Published Service API that allows us to filter results based on date of publication, not when it was modified in their database. We'll use this.
+
+The request structure is slightly different:
+
+https://api.govinfo.gov/published/{dateIssuedStartDate}/{dateIssuedEndDate}?offset={#}&pageSize={#}&collection={collection}&api_key={YOUR_KEY}
+
+Let's make a call for all bills published since the start of the year and see what the output looks like.
+
+
+=============================================================================
+
+## Make a Request - BILLS
+
+```{r}
+
+# Construct request
+base_url <- 'https://api.govinfo.gov/published/'
+dates <- paste('2022-01-01', Sys.Date(), sep = '/')
+os <- paste0('?offset=', 0)
+pgsize <- paste0('&pageSize=', 100)
+coll <- paste0('&collection=', 'BILLS')
+key_string <- paste0('&', api_key)
+request <- paste0(base_url, dates, os, pgsize, coll, key_string)
+
+
+```
+
+# Make call
+
+```{r}
+
+# Make call
+bill_request <- .fromJSON(request)
+str(bill_request)
+```
+
+
+============================================================================
+
+##  Exporting the DATA
+
+
+We can see the request is a list with 5 objects. 
+1. The first tells us the number of bills in total. 
+2. The second provides any network messages related to our request, such as errors if we were to receive any.
+3. The third provides us with a link the next page of bills. There is a cap on the number of bills returned in any given call, so we must iterate through all the pages. Luckily, the request points us to the next page. 
+4. The fourth object is a link to the previous page. 
+5. Finally, the data were are interest in is stored in an a dataframe named packages. This is what we want to store at each step.
+
+Let's write a function that will automatically iterate through all the pages and store what what want at each step.
+
+
+```{r}
+
+# Function to make call
+load_bill <- function(collection, start_date = NULL, end_date = NULL, 
+                            offset=0, size=100, key = api_key) {
+
+  if (is.null(start_date) | is.null(end_date)) stop('Must supply start and end dates.')
+
+  # Construct request
+  base_url <- 'https://api.govinfo.gov/published/'
+  dates <- paste('2022-01-01', Sys.Date(), sep = '/')
+  os <- paste0('?offset=', 0)
+  pgsize <- paste0('&pageSize=', 100)
+  coll <- paste0('&collection=', 'BILLS')
+  key_string <- paste0('&', api_key)
+  request <- paste0(base_url, dates, os, pgsize, coll, key_string)
+
+  # First API Call
+  for (attempt in 1:10){
+    try({
+      # Make request
+      bill_request <- .fromJSON(request)
+      break #break/exit for-loop
+    }, silent = T)
+  }
+
+  # Store outputs of interest
+  request_data <- bill_request$packages
+  nextPage <- bill_request$nextPage
+
+  # Iterate through all pages
+  while (!is.null(nextPage)) {
+
+    # Make call
+    bill_request <- .fromJSON(nextPage)
+
+    # Update outputs
+    request_data <- bind_rows(request_data, bill_request$packages)
+    nextPage <- bill_request$nextPage
+  }
+
+  return(request_data)
+}
+
+```
+
+
+```{r}
+
+
+# Bills issued starting in 2021 to current date
+df_bills <- load_bill(collection = 'BILLS', start_date = '2021-01-01', end_date = Sys.Date())
+
+# Preview bills
+df_bills %>% 
+  arrange(dateIssued) %>% 
+  kable(caption = 'Bills Issued Since Start of 2021') %>% 
+  kable_styling(bootstrap_options = 'hover', full_width = F, 
+                position = 'center', font_size = 10) %>% 
+  scroll_box(width = "100%", height = "1000px")
+
+view(df_bills)
+
+write_csv(df_bills, "bills_2021.csv")
+
+
+```
+
+
+## Package Service
+
+
+This service allows you to specify a govinfo packageId and retrieve available forms of content and metadata. A /summary json response is available that includes links and basic metadata about the package - generally equivalent to the information available on the details page for that package.
+
+    https://api.govinfo.gov/packages/FR-`YYYY`-`MM`-`DD`/summary?api_key=DEMO_KEY
+
+
+```{r}
+
+bill_package <- .fromJSON(paste("https://api.govinfo.gov/packages/BILLS-115hr1625enr/summary", api_key, sep = "?"))
+  glimpse(bill_package)
+
+```
+
+
+```{r}
+
+download.file(paste(bill_package$download$txtLink, api_key, sep = "?"), destfile = "bill115_1625.txt")
+
+bill115_1625 <- read_file("bill115_1625.txt")
+
+```
+
+
+```{r}
+
+install.packages("remotes")
+remotes::install_github("knapply/salinasr")
+
+
+library(salinasr)
+
+```
+
+```{r}
+
+bill115_1625_clean <- clean_html(x = bill115_1625)
+bill115_1625_clean
+
+
+```
+
+
+
+## Granules
+
+Similar to the package summary, you can retrieve a json summary for any granule, which will return basic metadata as well as links to all available content and metadata.
+
+
+https://api.govinfo.gov/packages/CREC-2018-07-10/granules/CREC-2018-07-10-pt1-PgD782/summary?api_key=DEMO_KEY
+
+
+```{r}
+
+crec_gran <- .fromJSON(paste("https://api.govinfo.gov/packages/CREC-2018-07-10/granules/CREC-2018-07-10-pt1-PgD782/summary", api_key, sep = "?"))
+  glimpse(crec_gran)
+
+```
+
+
+```{r}
+
+download.file(paste(crec_gran$download$txtLink, api_key, sep = "?"), destfile = "crec_2018_07_10.txt")
+
+  crec_2018_07_10 <- read_file(file = "crec_2018_07_10.txt")
+  crec_2018_07_10 <- clean_html(crec_2018_07_10)
+    crec_2018_07_10
+
+```
+
+
+## Related service
+
+The related service allows users to identify and retrieve content and metadata about related content within govinfo based on an access ID.
+
+
+```{r}
+
+bill_related <- .fromJSON(paste("https://api.govinfo.gov/related/BILLS-116hr748enr", api_key, sep = "?"))
+  glimpse(bill_related)
+  
+  view(bill_related$relationships)
+  
+  write_csv(bill_related$relationships, "bill_related.csv")
+  
+
+```
+
+
+
+==============================================================================
+
+## Agency APIs
+
+https://api.data.gov/
+
+https://api.ers.usda.gov/data/arms/state?api_key=YOUR_API_KEY
+
