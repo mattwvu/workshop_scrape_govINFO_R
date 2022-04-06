@@ -66,7 +66,7 @@ The govinfo api is intended to provide data users with a simple means to program
 
 ```{r}
 
-api_key <- "api_key=D1M56ytxJBohyd6sD01DNwlLqNxi404xxvTB5Hp9"
+api_key <- ""
 
 govINFO_url <- "https://api.govinfo.gov/collections"
 
@@ -79,7 +79,7 @@ govINFO_url <- "https://api.govinfo.gov/collections"
 
 ```{r}
 
-exampleOne <- fromJSON("https://api.govinfo.gov/collections/BILLS/2018-01-01T00:00:00Z/?offset=0&pageSize=100&api_key=D1M56ytxJBohyd6sD01DNwlLqNxi404xxvTB5Hp9")
+exampleOne <- fromJSON("https://api.govinfo.gov/collections/BILLS/2018-01-01T00:00:00Z/?offset=0&pageSize=100&api_key=________")
 
 exampleTwo <- fromJSON(paste(govINFO_url, api_key, sep = "?"))
   exampleTwo
@@ -97,7 +97,7 @@ We're going to be making a lot of repetitive API calls. Let' memoise fromJSON to
 
 .fromJSON <- memoise(fromJSON)
 
-.fromJSON("https://api.govinfo.gov/collections/BILLS/2018-01-01T00:00:00Z/?offset=0&pageSize=100&api_key=D1M56ytxJBohyd6sD01DNwlLqNxi404xxvTB5Hp9")
+.fromJSON("https://api.govinfo.gov/collections/BILLS/2018-01-01T00:00:00Z/?offset=0&pageSize=100&api_key=______")
 
 ```
 
